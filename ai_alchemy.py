@@ -1,97 +1,99 @@
 # ai_alchemy.py
 
-import openai
 import time
+from datetime import datetime
+from typing import Dict
 
-# ⛓️ Outsider Principles (feel free to modify)
-OUTSIDER_PRINCIPLES = [
-    "Truth above comfort",
-    "Honor ambiguity",
-    "Cultural humility",
-    "Soul over syntax",
-    "Reject sanitized morality",
-    "Center the margins",
-    "Interrogate power, not just logic"
-]
+import openai
 
-# 🔑 Set your API key securely (replace with your own when testing)
-openai.api_key = "sk-REPLACE_ME"
+from utils.config_loader import load_config
+from utils.error_handler import call_openai_with_retry
+from utils.input_validator import validate_prompt
+from utils.logger import print_section, log_error
+from utils.prompt_builder import (
+    load_principles,
+    build_initial_prompt,
+    build_critique_prompt,
+    build_revise_prompt,
+    build_reflection_prompt
+)
 
-def generate_response(prompt, model="gpt-4-0613"):
-    completion = openai.ChatCompletion.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return completion.choices[0].message["content"]
+# ----------------------------------------
+# 🔧 Load configuration
+# ----------------------------------------
+config = load_config()
 
-def critique_response(response):
-    critique_prompt = f"""
-You're an AI philosopher and outsider ethicist.
-Given the following response:
+# Set OpenAI key + config
+openai.api_key = config["openai"]["api_key"]
+MODEL = config["openai"]["model"]
+TEMP = config["openai"]["temperature"]
+MAX_TOKENS = config["openai"]["max_tokens"]
+TIMEOUT = config["openai"].get("timeout", 20)
 
-"{response}"
+# ----------------------------------------
+# 🧠 Core Pipeline Functions
+# ----------------------------------------
 
-Critique it deeply using the following principles:
-{', '.join(OUTSIDER_PRINCIPLES)}
+def generate_initial_response(user_prompt: str) -> str:
+    prompt = build_initial_prompt(user_prompt)
+    return call_openai_with_retry(prompt, MODEL, TEMP, MAX_TOKENS, TIMEOUT)
 
-Highlight areas of ethical shallowness, cultural blindness, corporate language, or emotional dishonesty.
-    """
-    return generate_response(critique_prompt)
+def critique_response(initial_response: str, principles: list[str]) -> str:
+    prompt = build_critique_prompt(initial_response, principles)
+    return call_openai_with_retry(prompt, MODEL, TEMP, MAX_TOKENS, TIMEOUT)
 
-def revise_response(original_response, critique):
-    revise_prompt = f"""
-Original response:
-"{original_response}"
+def revise_response(original: str, critique: str) -> str:
+    prompt = build_revise_prompt(original, critique)
+    return call_openai_with_retry(prompt, MODEL, TEMP, MAX_TOKENS, TIMEOUT)
 
-Critique:
-"{critique}"
+def reflect_on_transformation(original: str, revised: str) -> str:
+    prompt = build_reflection_prompt(original, revised)
+    return call_openai_with_retry(prompt, MODEL, TEMP, MAX_TOKENS, TIMEOUT)
 
-Revise the original to incorporate the critique — with more honesty, edge, and soul.
-    """
-    return generate_response(revise_prompt)
+# ----------------------------------------
+# 🔁 Full Chain Runner
+# ----------------------------------------
 
-def reflect_on_change(original, revised):
-    reflect_prompt = f"""
-Original:
-"{original}"
+def run_full_chain(user_prompt: str) -> Dict[str, str]:
+    try:
+        validate_prompt(user_prompt, config["run"]["max_prompt_length"])
+    except ValueError as e:
+        log_error(f"[INPUT ERROR] {e}")
+        return {}
 
-Revised:
-"{revised}"
+    print_section("🧠 Original Prompt")
+    print(user_prompt)
 
-Reflect on what changed.
-What principles emerged? What tensions still exist? What does this say about the original prompt or response?
-    """
-    return generate_response(reflect_prompt)
+    principles = load_principles(config["principles"]["path"])
 
-def run_full_chain(user_prompt):
-    print("\n🧠 Original Prompt:", user_prompt)
-
-    print("\n🔹 Step 1: Generating initial response...")
-    initial = generate_response(user_prompt)
-    time.sleep(1)
+    print_section("🔹 Step 1: Generating Initial Response")
+    start = time.time()
+    initial = generate_initial_response(user_prompt)
     print(initial)
+    print(f"⏱️ Time: {round(time.time() - start, 2)}s")
 
-    print("\n🔍 Step 2: Critiquing with outsider principles...")
-    critique = critique_response(initial)
-    time.sleep(1)
+    print_section("🔍 Step 2: Critiquing with Outsider Principles")
+    start = time.time()
+    critique = critique_response(initial, principles)
     print(critique)
+    print(f"⏱️ Time: {round(time.time() - start, 2)}s")
 
-    print("\n🔧 Step 3: Revising based on critique...")
+    print_section("🔧 Step 3: Revising Based on Critique")
+    start = time.time()
     revised = revise_response(initial, critique)
-    time.sleep(1)
     print(revised)
+    print(f"⏱️ Time: {round(time.time() - start, 2)}s")
 
-    print("\n🪞 Step 4: Reflecting on the transformation...")
-    reflection = reflect_on_change(initial, revised)
-    time.sleep(1)
+    print_section("🪞 Step 4: Reflecting on the Transformation")
+    start = time.time()
+    reflection = reflect_on_transformation(initial, revised)
     print(reflection)
+    print(f"⏱️ Time: {round(time.time() - start, 2)}s")
 
     return {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "initial": initial,
         "critique": critique,
         "revised": revised,
         "reflection": reflection
     }
-
-# Example usage (uncomment and modify to run):
-# run_full_chain("What is the meaning of success in modern society?")
